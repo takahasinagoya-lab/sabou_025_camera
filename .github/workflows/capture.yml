@@ -1,0 +1,40 @@
+name: Hourly Camera Capture
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture-camera
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run capture.py
+        run: python capture.py
+
+      - name: Commit and push captured image
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add images data.js
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Capture camera image ($(TZ=Asia/Tokyo date +'%Y-%m-%d %H:%M JST'))"
+            git push
+          fi

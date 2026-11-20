@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111317" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>ライブカメラ履歴ビューア (sabou_025)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      min-height: 100vh;
+      background-color: #111317;
+      color: #e6e8ec;
+      font-family: "Yu Gothic UI", "Meiryo", system-ui, -apple-system, sans-serif;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 14px;
+      background-color: rgba(20, 23, 29, 0.94);
+      border-bottom: 1px solid #2a2f3a;
+      backdrop-filter: blur(6px);
+    }
+
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f3f4f6;
+      letter-spacing: 0.02em;
+    }
+
+    .date-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    button, select {
+      background-color: #1e232c;
+      color: #e6e8ec;
+      border: 1px solid #343b48;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s;
+    }
+
+    button:hover:not(:disabled), select:hover {
+      background-color: #29303d;
+      border-color: #4b5565;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    /* 4列 × 6行 画面幅いっぱい */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(6, auto);
+      gap: 4px;
+      width: 100%;
+      padding: 4px;
+    }
+
+    .cell {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background-color: #1a1d24;
+      border: 1px solid #252a34;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .cell img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+      transition: transform 0.15s ease;
+    }
+
+    .cell img:hover {
+      transform: scale(1.02);
+    }
+
+    .cell-empty {
+      color: #5b6372;
+      font-size: 13px;
+      user-select: none;
+    }
+
+    .time-badge {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background-color: rgba(0, 0, 0, 0.68);
+      color: #f9fafb;
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: none;
+      letter-spacing: 0.03em;
+    }
+
+    /* 1枚ウィンドウ一杯表示 */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: rgba(0, 0, 0, 0.96);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+
+    .lightbox.open {
+      display: flex;
+    }
+
+    .lightbox img {
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain;
+      cursor: zoom-out;
+      user-select: none;
+    }
+
+    .lightbox-label {
+      position: fixed;
+      top: 12px;
+      left: 16px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background-color: rgba(0, 0, 0, 0.72);
+      color: #f9fafb;
+      font-size: 14px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    .no-data {
+      padding: 48px 16px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <span class="title">砂防ライブカメラ履歴 (sabou_025)</span>
+      <div class="date-controls">
+        <button id="prevDateBtn" type="button" title="前の日付">◀ 前日</button>
+        <select id="dateSelect" aria-label="日付選択"></select>
+        <button id="nextDateBtn" type="button" title="次の日付">翌日 ▶</button>
+      </div>
+    </div>
+    <div class="toolbar-right">
+      <span id="countInfo"></span>
+      <span id="updatedInfo"></span>
+      <button id="reloadBtn" type="button">再読み込み</button>
+    </div>
+  </header>
+
+  <main id="gridContainer" class="grid"></main>
+  <div id="emptyMessage" class="no-data" style="display: none;">
+    保存された画像がまだありません。<code>capture.py</code> を実行してください。
+  </div>
+
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true">
+    <img id="lightboxImg" src="" alt="拡大画像" />
+    <div id="lightboxLabel" class="lightbox-label"></div>
+  </div>
+
+  <script>
+    (function () {
+      const script = document.createElement("script");
+      script.src = "data.js?t=" + Date.now();
+      script.onload = initViewer;
+      script.onerror = initViewer;
+      document.body.appendChild(script);
+    })();
+
+    function initViewer() {
+      const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+
+      const dateSelect = document.getElementById("dateSelect");
+      const prevDateBtn = document.getElementById("prevDateBtn");
+      const nextDateBtn = document.getElementById("nextDateBtn");
+      const reloadBtn = document.getElementById("reloadBtn");
+      const countInfo = document.getElementById("countInfo");
+      const updatedInfo = document.getElementById("updatedInfo");
+      const gridContainer = document.getElementById("gridContainer");
+      const emptyMessage = document.getElementById("emptyMessage");
+
+      const lightbox = document.getElementById("lightbox");
+      const lightboxImg = document.getElementById("lightboxImg");
+      const lightboxLabel = document.getElementById("lightboxLabel");
+
+      const data = window.CAMERA_DATA || { updatedAt: "", dates: {} };
+      // 新しい日付順
+      const availableDates = Object.keys(data.dates || {}).sort((a, b) => b.localeCompare(a));
+
+      if (data.updatedAt) {
+        updatedInfo.textContent = "最終更新: " + data.updatedAt;
+      }
+
+      if (availableDates.length === 0) {
+        gridContainer.style.display = "none";
+        emptyMessage.style.display = "block";
+        dateSelect.disabled = true;
+        prevDateBtn.disabled = true;
+        nextDateBtn.disabled = true;
+        reloadBtn.addEventListener("click", () => location.reload());
+        return;
+      }
+
+      availableDates.forEach((dateStr) => {
+        const opt = document.createElement("option");
+        opt.value = dateStr;
+        opt.textContent = dateStr;
+        dateSelect.appendChild(opt);
+      });
+
+      function openLightbox(src, label) {
+        lightboxImg.src = src;
+        lightboxLabel.textContent = label;
+        lightbox.classList.add("open");
+      }
+
+      function closeLightbox() {
+        lightbox.classList.remove("open");
+        lightboxImg.src = "";
+      }
+
+      // 画像またはオーバーレイをクリックしたら4列6行に戻る
+      lightbox.addEventListener("click", closeLightbox);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && lightbox.classList.contains("open")) {
+          closeLightbox();
+        }
+      });
+
+      function renderDate(dateStr) {
+        const hoursMap = data.dates[dateStr] || {};
+        gridContainer.innerHTML = "";
+
+        let capturedCount = 0;
+
+        HOURS.forEach((hh) => {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+
+          const badge = document.createElement("span");
+          badge.className = "time-badge";
+          badge.textContent = hh + ":00";
+
+          const imgPath = hoursMap[hh];
+          if (imgPath) {
+            capturedCount += 1;
+            const img = document.createElement("img");
+            img.src = imgPath + "?t=" + encodeURIComponent(data.updatedAt || Date.now());
+            img.alt = dateStr + " " + hh + ":00";
+            img.loading = "lazy";
+            img.addEventListener("click", () => {
+              openLightbox(img.src, dateStr + " " + hh + ":00");
+            });
+            cell.appendChild(img);
+          } else {
+            const placeholder = document.createElement("span");
+            placeholder.className = "cell-empty";
+            placeholder.textContent = "未取得";
+            cell.appendChild(placeholder);
+          }
+
+          cell.appendChild(badge);
+          gridContainer.appendChild(cell);
+        });
+
+        countInfo.textContent = "取得済み: " + capturedCount + " / 24枚";
+
+        const idx = availableDates.indexOf(dateStr);
+        // availableDates は降順 (0 が最新)
+        nextDateBtn.disabled = idx <= 0;
+        prevDateBtn.disabled = idx < 0 || idx >= availableDates.length - 1;
+      }
+
+      dateSelect.addEventListener("change", () => {
+        renderDate(dateSelect.value);
+      });
+
+      prevDateBtn.addEventListener("click", () => {
+        const idx = availableDates.indexOf(dateSelect.value);
+        if (idx >= 0 && idx < availableDates.length - 1) {
+          dateSelect.value = availableDates[idx + 1];
+          renderDate(dateSelect.value);
+        }
+      });
+
+      nextDateBtn.addEventListener("click", () => {
+        const idx = availableDates.indexOf(dateSelect.value);
+        if (idx > 0) {
+          dateSelect.value = availableDates[idx - 1];
+          renderDate(dateSelect.value);
+        }
+      });
+
+      reloadBtn.addEventListener("click", () => location.reload());
+
+      // 初期表示は最新日
+      dateSelect.value = availableDates[0];
+      renderDate(availableDates[0]);
+    }
+  </script>
+</body>
+</html>
